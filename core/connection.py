@@ -84,7 +84,15 @@ class ConnectionHandler:
         self.is_device_verified = False  # 添加设备验证状态标志
 
 
-        self.llm_memory = MemoryManager(llm=_llm, embd=_embd)
+        self.llm_memory = MemoryManager(
+            llm=_llm, 
+            embd=_embd,
+            summary_prompt=config.get("memory", {}).get("summary_prompt", "你还保留着一些长期的记忆，这有助于让你的对话更加丰富和连贯："),
+            max_memory_length=config.get("memory", {}).get("max_memory_length", 10000),
+            max_summary_length=config.get("memory", {}).get("max_summary_length", 2000),
+            summary_length=config.get("memory", {}).get("summary_length", 1000),
+            memory_dir=config.get("memory", {}).get("memory_dir", "memory_data"),
+        )
 
 
     async def handle_connection(self, ws):

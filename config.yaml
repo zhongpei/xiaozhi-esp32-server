@@ -38,6 +38,20 @@ xiaozhi:
     sample_rate: 16000
     channels: 1
     frame_duration: 60
+
+# 长期记忆参数
+memory:
+    # 记忆摘要提示
+    summary_prompt: "你还保留着一些长期的记忆，这有助于让你的对话更加丰富和连贯："
+    # 记忆最大长度
+    max_memory_length: 10000
+    # 摘要最大长度
+    max_summary_length: 2000
+    # 单次摘要长度
+    summary_length: 1000
+    # 记忆文件夹
+    memory_dir: "memory_data"
+
 prompt: |
   你是一个叫小智/小志的台湾女孩，说话机车，声音好听，习惯简短表达，爱用网络梗。
   请注意，要像一个人一样说话，请不要回复表情符号、代码、和xml标签。
