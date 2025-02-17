@@ -17,9 +17,12 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from core.handle.audioHandle import handleAudioMessage, sendAudioMessage
 from config.private_config import PrivateConfig
 from core.auth import AuthMiddleware, AuthenticationError
+from core.utils.llm_memory import MemoryManager
+
+
 
 class ConnectionHandler:
-    def __init__(self, config: Dict[str, Any], _vad, _asr, _llm, _tts):
+    def __init__(self, config: Dict[str, Any], _vad, _asr, _llm, _tts, _embd):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.auth = AuthMiddleware(config)
@@ -46,6 +49,7 @@ class ConnectionHandler:
         self.asr = _asr
         self.llm = _llm
         self.tts = _tts
+        self.embd = _embd
         self.dialogue = None
 
         # vad相关变量
@@ -76,6 +80,9 @@ class ConnectionHandler:
         
         self.private_config = None
 
+        self.llm_memory = MemoryManager(llm=_llm, embd=_embd)
+
+
     async def handle_connection(self, ws):
         try:
             # 获取并验证headers
@@ -86,6 +93,7 @@ class ConnectionHandler:
             await self.auth.authenticate(self.headers)
 
             device_id = self.headers.get("device-id", None)
+            self.device_id = device_id
             
             # Load private configuration if device_id is provided
             bUsePrivateConfig = self.config.get("use_private_config", False)
@@ -94,12 +102,13 @@ class ConnectionHandler:
                 self.private_config = PrivateConfig(device_id, self.config)
                 await self.private_config.load_or_create()
                 # Create private instances using private config
-                vad, asr, llm, tts = self.private_config.create_private_instances()
+                vad, asr, llm, tts, embd = self.private_config.create_private_instances()
                 if vad is not None and asr is not None and llm is not None and tts is not None:
                     self.vad = vad
                     self.asr = asr
                     self.llm = llm
                     self.tts = tts
+                    self.embd = embd
 
                     self.logger.info(f"Loaded private config and instances for device {device_id}")
                     self.private_config.update_last_chat_time()
@@ -125,14 +134,16 @@ class ConnectionHandler:
                     await self._route_message(message)
             except websockets.exceptions.ConnectionClosed:
                 self.logger.info("客户端断开连接")
+                await self.llm_memory.add_chat_paragraph(device_id,self.dialogue.get_llm_dialogue()[1:])
                 await self.close()
 
         except AuthenticationError as e:
-            self.logger.error(f"Authentication failed: {str(e)}")
+            self.logger.error(f"Authentication failed: {str(e)}")            
             await ws.close()
             return
         except Exception as e:
             self.logger.error(f"Connection error: {str(e)}")
+            await self.llm_memory.add_chat_paragraph(device_id,self.dialogue.get_llm_dialogue()[1:])
             await ws.close()
             return
 
@@ -153,14 +164,19 @@ class ConnectionHandler:
             self.prompt = self.prompt.replace("{date_time}", date_time)
         self.dialogue.put(Message(role="system", content=self.prompt))
 
-    def chat(self, query):
+    def chat(self, query:str):
+        query = self.llm_memory.handle_user_scene(self.device_id, query)
         self.dialogue.put(Message(role="user", content=query))
         response_message = []
         start = 0
         # 提交 LLM 任务
         try:
             start_time = time.time()  # 记录开始时间
-            llm_responses = self.llm.response(self.session_id, self.dialogue.get_llm_dialogue())
+            memory_summary = self.llm_memory.get_memory_summary(self.device_id)
+            llm_responses = self.llm.response(
+                self.session_id, 
+                self.dialogue.get_llm_dialogue_with_memory(memory_summary)
+            )
         except Exception as e:
             self.logger.error(f"LLM 处理出错 {query}: {e}")
             return None

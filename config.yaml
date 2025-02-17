@@ -60,6 +60,7 @@ selected_module:
   LLM: ChatGLMLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
   TTS: EdgeTTS
+  EMBD: SentenceTransformer
 
 ASR:
   FunASR:
@@ -71,6 +72,11 @@ VAD:
     threshold: 0.5
     model_dir: models/snakers4_silero-vad
     min_silence_duration_ms: 700  # 如果说话停顿比较长，可以把这个值设置大一些
+
+EMBD:
+  SentenceTransformer:
+    model_dir: models/jina-embeddings-v2-base-zh
+    device: "cpu"
 
 LLM:
   # 当前支持的type为openai、dify、ollama，可自行适配
