@@ -4,8 +4,8 @@
 
     <!-- Breadcrumb -->
     <div class="breadcrumb">
-      <router-link to="/control-panel">控制台</router-link> /
-      <router-link to="/device-management">设备管理</router-link> /
+      <router-link to="/">首页</router-link> /
+      <router-link to="/panel">设备管理</router-link> /
       <span>配置角色</span>
     </div>
 
@@ -107,12 +107,16 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import NavBar from './NavBar.vue';
 import RoleTemplates from '../utils/RoleTemplates';
-import { API_BASE_URL } from '../config/api';
+import apiClient from '../utils/api';  // 替换 API_BASE_URL 导入
+
+const router = useRouter();
+const route = useRoute();
+const deviceId = ref(route.params.deviceId);
 
 const roleTemplates = RoleTemplates.getTemplates();
-
 const nickname = ref('小智');
 const selectedTemplate = ref('');
 const selectedVoice = ref('qingchun');
@@ -121,7 +125,6 @@ const activeMemoryTab = ref('recent');
 const memoryContent = ref('');
 const selectedModel = ref('qianwen');
 
-const baseUrl = API_BASE_URL;
 const moduleOptions = ref({
   LLM: [],
   TTS: [],
@@ -144,29 +147,11 @@ const selectTemplate = (templateId) => {
   }
 };
 
-const emit = defineEmits(['back-to-panel']);
-
-const handleBack = () => {
-  console.log('Triggering back-to-panel event'); // 添加调试日志
-  emit('back-to-panel');
-};
-
 const handleTabChange = (tab) => {
   if (tab === 'device' || tab === 'home') {
-    emit('back-to-panel');
+    router.push('/panel');
   }
 };
-
-// 修改deviceId的定义，接收props
-const props = defineProps({
-  deviceId: {
-    type: String,
-    required: true
-  }
-});
-
-// 使用props中的deviceId替换原来的静态值
-const deviceId = ref(props.deviceId);
 
 const loadModuleOptions = async () => {
   try {
@@ -184,15 +169,15 @@ const loadModuleOptions = async () => {
 
 const refreshModuleOptions = async () => {
   try {
-    const response = await fetch(`${baseUrl}/api/config/module-options`);
-    const data = await response.json();
-    if (data.success) {
-      moduleOptions.value = data.data;
+    const response = await apiClient.get('/api/config/module-options');
+    if (response.data.success) {
+      moduleOptions.value = response.data.data;
       // Update cache
-      localStorage.setItem('moduleOptions', JSON.stringify(data.data));
+      localStorage.setItem('moduleOptions', JSON.stringify(response.data.data));
     }
   } catch (error) {
     console.error('Error refreshing module options:', error);
+    alert(error.response?.data?.message || '刷新配置选项失败');
   }
 };
 
@@ -208,7 +193,7 @@ const saveConfig = async () => {
 
     // Prepare the configuration including full module settings
     const config = {
-      id: props.deviceId,
+      id: deviceId.value,
       config: {
         selected_module: selectedModules.value,
         prompt: processedDescription,
@@ -222,64 +207,68 @@ const saveConfig = async () => {
       }
     };
     
-    const response = await fetch(`${baseUrl}/api/config/save_device_config`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(config)
-    });
+    const response = await apiClient.post('/api/config/save_device_config', config);
     
-    const data = await response.json();
-    if (data.success) {
+    if (response.data.success) {
       // Save the original description and nickname to local storage
-      localStorage.setItem(`deviceConfig_${props.deviceId}`, JSON.stringify({
+      localStorage.setItem(`deviceConfig_${deviceId.value}`, JSON.stringify({
         selected_module: selectedModules.value,
         prompt: roleDescription.value,
         nickname: nickname.value
       }));
       alert('保存成功');
     } else {
-      throw new Error(data.message || '保存失败');
+      throw new Error(response.data.message || '保存失败');
     }
   } catch (error) {
     console.error('Error saving config:', error);
-    alert(error.message || '保存失败');
+    alert(error.response?.data?.message || '保存失败');
   }
 };
 
 const loadDeviceConfig = async () => {
   try {
-    // First try to get config from local storage
-    const localConfig = localStorage.getItem(`deviceConfig_${props.deviceId}`);
+    // 首先尝试从 localStorage 获取配置
+    const localConfig = localStorage.getItem(`deviceConfig_${deviceId.value}`);
     if (localConfig) {
       const config = JSON.parse(localConfig);
-      selectedModules.value = config.selected_module || {};
+      selectedModules.value = config.selected_module || {
+        LLM: '',
+        TTS: '',
+        VAD: '',
+        ASR: ''
+      };
       roleDescription.value = config.prompt || '';
-      nickname.value = config.nickname || '小智'; // Load saved nickname
-      return;
+      nickname.value = config.nickname || '小智';
+      return; // 如果找到本地配置就直接返回
     }
 
-    // If no local config, fetch from server
-    const response = await fetch(`${baseUrl}/api/config/devices`);
-    const data = await response.json();
-    if (data.success) {
-      const deviceConfig = data.data.find(d => d.id === props.deviceId);
-      if (deviceConfig) {
-        selectedModules.value = deviceConfig.config.selected_module || {};
+    // 如果没有本地配置，则从服务器获取
+    const response = await apiClient.get('/api/config/devices');
+    if (response.data.success && response.data.data) {
+      const deviceConfig = response.data.data[deviceId.value];
+      
+      if (deviceConfig && deviceConfig.config) {
+        selectedModules.value = deviceConfig.config.selected_module || {
+          LLM: '',
+          TTS: '',
+          VAD: '',
+          ASR: ''
+        };
         roleDescription.value = deviceConfig.config.prompt || '';
-        nickname.value = deviceConfig.config.nickname || '小智'; // Load nickname from server
+        nickname.value = deviceConfig.config.nickname || '小智';
         
-        // Save to local storage
-        localStorage.setItem(`deviceConfig_${props.deviceId}`, JSON.stringify({
-          selected_module: deviceConfig.config.selected_module,
-          prompt: deviceConfig.config.prompt,
-          nickname: deviceConfig.config.nickname
+        // 保存到 localStorage
+        localStorage.setItem(`deviceConfig_${deviceId.value}`, JSON.stringify({
+          selected_module: selectedModules.value,
+          prompt: roleDescription.value,
+          nickname: nickname.value
         }));
       }
     }
   } catch (error) {
     console.error('Error loading device config:', error);
+    alert(error.response?.data?.message || '加载设备配置失败');
   }
 };
 
@@ -297,7 +286,7 @@ const resetConfig = async () => {
 
 <style scoped>
 .app-container {
-  height: 100%;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   background-color: #f5f7fa;
@@ -313,7 +302,9 @@ const resetConfig = async () => {
   max-width: 1000px;
   margin: 0 auto;
   padding: 16px 24px;
-  overflow: auto;
+  width: 100%;
+  overflow-y: auto;
+  height: calc(100vh - 120px); /* 减去头部和面包屑的高度 */
 }
 
 .page-title {
@@ -327,6 +318,7 @@ const resetConfig = async () => {
   border-radius: 4px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  margin-bottom: 20px;
 }
 
 .form-group {
