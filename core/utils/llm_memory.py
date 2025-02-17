@@ -456,7 +456,7 @@ class MemoryManager:
 
         except Exception as e:
             logger.warning(f"加载记忆时出错: {e}")
-            self.memory_data = {}
+            
 
 if __name__ == '__main__':
     from sentence_transformers import SentenceTransformer

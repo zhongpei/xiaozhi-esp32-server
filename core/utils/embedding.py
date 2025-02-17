@@ -14,7 +14,7 @@ class SentenceEMBD(EMBD):
         from sentence_transformers import SentenceTransformer,export_optimized_onnx_model
         self.model_dir = config.get("model_dir")
         self.device = config.get("device","cpu")
-        # model_dir = "./models/jina-embeddings-v2-base-zh"
+        # model_dir = "jinaai/jina-embeddings-v2-base-zh"
         if not os.path.exists(os.path.join(self.model_dir,"onnx","model_O3.onnx")):
             self.model = SentenceTransformer(
                 self.model_dir,

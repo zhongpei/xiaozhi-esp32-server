@@ -75,7 +75,9 @@ VAD:
 
 EMBD:
   SentenceTransformer:
+    # 下载 https://huggingface.co/jinaai/jina-embeddings-v2-base-zh/blob/main/onnx/model.onnx 到 models/jina-embeddings-v2-base-zh/onnx/model.onnx
     model_dir: models/jina-embeddings-v2-base-zh
+    # cpu cuda:0 推荐cpu节省显存
     device: "cpu"
 
 LLM:
