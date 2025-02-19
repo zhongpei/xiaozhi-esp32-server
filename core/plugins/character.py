@@ -206,7 +206,7 @@ class CharacterManager:
         result = self.intent_recognizer.handle_query(query, token_name)
         if result.success:
             text,character = result.response
-            print(f"current_character {self.current_character} ==> {character.name}")            
+            # print(f"current_character {self.current_character} ==> {character.name}")            
             return text,character           
 
         return None,None

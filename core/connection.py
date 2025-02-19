@@ -116,10 +116,8 @@ class ConnectionHandler:
                     if self.is_device_verified:
                         await self.private_config.update_last_chat_time() 
                     
-                    vad, asr, llm, tts ,embd = self.private_config.create_private_instances()
-                    if all([vad, asr, llm, tts]):
-                        self.vad = vad
-                        self.asr = asr
+                    llm, tts, embd = self.private_config.create_private_instances()
+                    if all([llm, tts, embd]):
                         self.llm = llm
                         self.tts = tts
                         self.embd = embd
@@ -232,7 +230,6 @@ class ConnectionHandler:
             query,
             ChatHistory.create_from_chat_history(self.dialogue.get_llm_dialogue())
         )
-        # print(f"connect1  {result}")
 
         if result.modified:
             if result.result.get("query"):
@@ -297,8 +294,6 @@ class ConnectionHandler:
                 ChatHistory.create_from_chat_history(self.dialogue.get_llm_dialogue())
             )
             if result.modified:
-                # if result.result.get("query"):
-                #    query = result.result.get("query")
                 if result.result.get("chat_history"):
                     self.dialogue = chat_history_to_dialogue(result.result.get("chat_history").get_chat_history())     
                 if result.result.get("tts_config"):
