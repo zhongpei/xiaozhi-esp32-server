@@ -238,6 +238,9 @@ class ConnectionHandler:
                 self.dialogue = chat_history_to_dialogue(result.result.get("chat_history").get_chat_history())  
             if result.result.get("tts_config"):
                 self.tts_config =  result.result.get("tts_config")
+        # self.logger.bind(tag=TAG).debug(
+        #    f"Chat Start: {query}, Tts config: {self.tts_config}, chat_history: {json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False)}"
+        #)
 
         self.dialogue.put(Message(role="user", content=query))            
         response_message = []

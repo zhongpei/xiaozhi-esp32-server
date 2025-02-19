@@ -232,7 +232,7 @@ plugins:
     # 长期记忆
     - "memory"
     # 多人物角色
-    # - "character"
+    - "character"
   characters:
     - name: "小王"
       prompt: "你的名字叫小王，你是我的司机"
@@ -253,7 +253,7 @@ plugins:
     # 长期记忆参数
   memory:
       # 记忆摘要提示
-      summary_prompt: "你还保留着一些长期的记忆，这有助于让你的对话更加丰富和连贯："
+      summary_prompt: "请总结下面的聊天内容,必须在{content_len}字数以内，必须包含聊天的完整细节:"
       # 记忆最大长度
       max_memory_length: 10000
       # 摘要最大长度

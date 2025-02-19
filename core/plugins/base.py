@@ -210,13 +210,12 @@ class PluginManager:
 
         callbacks = sorted(self._callbacks.get(event, []), key=lambda x: x[0])
         result = PluginResult(success=True)
-        for _, callback in callbacks:
-            # print(f"trigger_event callback {callback} {args} {kwargs}")
+        for _, callback in callbacks:            
             new_result = callback(*args, **kwargs)
             # print(f"trigger_event callback  {callback}  {new_result}")
+            logger.bind(tag=TAG).info(f"触发事件 {event}，回调函数 {callback}，结果 {new_result}")
             if new_result:
-                result.merge(new_result)
-        # print(f"trigger_event result {result}")
+                result.merge(new_result)   
         return result
 
 
