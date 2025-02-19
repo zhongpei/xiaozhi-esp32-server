@@ -17,13 +17,14 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from core.handle.audioHandle import handleAudioMessage, sendAudioMessage
 from config.private_config import PrivateConfig
 from core.auth import AuthMiddleware, AuthenticationError
-from core.utils.llm_memory import MemoryManager
+from core.plugins.base import PluginManager,PluginEvent,ChatHistory
 from core.utils.auth_code_gen import AuthCodeGenerator  # 添加导入
+from core.utils.dialogue import chat_history_to_dialogue
 
 TAG = __name__
 
 class ConnectionHandler:
-    def __init__(self, config: Dict[str, Any], _vad, _asr, _llm, _tts, _embd):
+    def __init__(self, config: Dict[str, Any], _vad, _asr, _llm, _tts, _embd, _plugin_manager:PluginManager):
         self.config = config
         self.logger = setup_logging()
         self.auth = AuthMiddleware(config)
@@ -84,16 +85,8 @@ class ConnectionHandler:
         self.auth_code_gen = AuthCodeGenerator.get_instance()
         self.is_device_verified = False  # 添加设备验证状态标志
 
-
-        self.llm_memory = MemoryManager(
-            llm=_llm, 
-            embd=_embd,
-            summary_prompt=config.get("memory", {}).get("summary_prompt", "你还保留着一些长期的记忆，这有助于让你的对话更加丰富和连贯："),
-            max_memory_length=config.get("memory", {}).get("max_memory_length", 10000),
-            max_summary_length=config.get("memory", {}).get("max_summary_length", 2000),
-            summary_length=config.get("memory", {}).get("summary_length", 1000),
-            memory_dir=config.get("memory", {}).get("memory_dir", "memory_data"),
-        )
+        self.plugin_manager = _plugin_manager
+        self.tts_config = {}
 
 
     async def handle_connection(self, ws):
@@ -158,7 +151,11 @@ class ConnectionHandler:
                     await self._route_message(message)
             except websockets.exceptions.ConnectionClosed:
                 self.logger.bind(tag=TAG).info("客户端断开连接")
-                await self.llm_memory.add_chat_paragraph(device_id,self.dialogue.get_llm_dialogue()[1:])
+                await self.plugin_manager.async_trigger_event(
+                    PluginEvent.DISCONNECT, 
+                    self.device_id, 
+                    ChatHistory.create_from_chat_history(self.dialogue.get_llm_dialogue())
+                )
                 await self.close()
 
         except AuthenticationError as e:
@@ -167,7 +164,12 @@ class ConnectionHandler:
             return
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"Connection error: {str(e)}")
-            await self.llm_memory.add_chat_paragraph(device_id,self.dialogue.get_llm_dialogue()[1:])
+
+            await self.plugin_manager.async_trigger_event(
+                PluginEvent.DISCONNECT, 
+                self.device_id, 
+                ChatHistory.create_from_chat_history(self.dialogue.get_llm_dialogue())
+            )
 
             await ws.close()
             return
@@ -223,54 +225,104 @@ class ConnectionHandler:
                 loop.close()
             return True        
 
-        query = self.llm_memory.handle_user_scene(self.device_id, query)
-        self.dialogue.put(Message(role="user", content=query))
+
+        result = self.plugin_manager.trigger_event(
+            PluginEvent.CHAT_START, 
+            self.device_id, 
+            query,
+            ChatHistory.create_from_chat_history(self.dialogue.get_llm_dialogue())
+        )
+        print(f"connect1  {result}")
+
+        if result.modified:
+            
+            self.logger.bind(tag=TAG).debug(f"Modified: {result.result}")
+            
+            if result.result.get("query"):
+                query = result.result.get("query")
+                print(f"query  modified {query}")
+            if result.result.get("chat_history"):
+                self.dialogue = chat_history_to_dialogue(result.result.get("chat_history").get_chat_history())    
+                print(f"dialogue  modified {self.dialogue.get_llm_dialogue()}")      
+            if result.result.get("tts_config"):
+                self.tts_config =  result.result.get("tts_config")
+                print(f"tts_config  modified {self.tts_config}")
+
+        self.dialogue.put(Message(role="user", content=query))            
         response_message = []
         start = 0
+
         # 提交 LLM 任务
         try:
-            start_time = time.time()  # 记录开始时间
-            memory_summary = self.llm_memory.get_memory_summary(self.device_id)
+            start_time = time.time()  # 记录开始时间            
             llm_responses = self.llm.response(
                 self.session_id, 
-                self.dialogue.get_llm_dialogue_with_memory(memory_summary)
+                self.dialogue.get_llm_dialogue()
             )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
             return None
-        # 提交 TTS 任务到线程池
-        self.llm_finish_task = False
-        for content in llm_responses:
-            response_message.append(content)
-            # 如果中途被打断，就停止生成
-            if self.client_abort:
-                start = len(response_message)
-                break
+        try:
+            # 提交 TTS 任务到线程池
+            self.llm_finish_task = False
+            for content in llm_responses:
+                response_message.append(content)
+                # 如果中途被打断，就停止生成
+                if self.client_abort:
+                    start = len(response_message)
+                    break
 
-            end_time = time.time()  # 记录结束时间
-            self.logger.bind(tag=TAG).debug(f"大模型返回时间时间: {end_time - start_time} 秒, 生成token={content}")
-            if is_segment(response_message):
+                end_time = time.time()  # 记录结束时间
+                self.logger.bind(tag=TAG).debug(f"大模型返回时间时间: {end_time - start_time} 秒, 生成token={content}")
+                if is_segment(response_message):
+                    segment_text = "".join(response_message[start:])
+                    segment_text = get_string_no_punctuation_or_emoji(segment_text)
+                    if len(segment_text) > 0:
+                        self.recode_first_last_text(segment_text)                        
+                        future = self.executor.submit(self.speak_and_play, segment_text, self.tts_config)
+                        self.tts_queue.put(future)
+                        start = len(response_message)
+
+            # 处理剩余的响应
+            if start < len(response_message):
                 segment_text = "".join(response_message[start:])
-                segment_text = get_string_no_punctuation_or_emoji(segment_text)
                 if len(segment_text) > 0:
                     self.recode_first_last_text(segment_text)
-                    future = self.executor.submit(self.speak_and_play, segment_text)
+                    future = self.executor.submit(self.speak_and_play, segment_text, self.tts_config)
                     self.tts_queue.put(future)
-                    start = len(response_message)
 
-        # 处理剩余的响应
-        if start < len(response_message):
-            segment_text = "".join(response_message[start:])
-            if len(segment_text) > 0:
-                self.recode_first_last_text(segment_text)
-                future = self.executor.submit(self.speak_and_play, segment_text)
-                self.tts_queue.put(future)
+            self.llm_finish_task = True
+            
+            answer = "".join(response_message)          
 
-        self.llm_finish_task = True
-        # 更新对话
-        self.dialogue.put(Message(role="assistant", content="".join(response_message)))
-        self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
-        return True
+            result = self.plugin_manager.trigger_event(
+                PluginEvent.CHAT_END,
+                self.device_id,
+                query,
+                answer,
+                ChatHistory.create_from_chat_history(self.dialogue.get_llm_dialogue())
+            )
+            if result.modified:
+                self.logger.bind(tag=TAG).debug(f"Modified: {result.result}")
+                # if result.result.get("query"):
+                #    query = result.result.get("query")
+                if result.result.get("chat_history"):
+                    self.dialogue = chat_history_to_dialogue(result.result.get("chat_history").get_chat_history())     
+                if result.result.get("tts_config"):
+                    self.tts_config =  result.result.get("tts_config")
+                if result.result.get("answer"):
+                    answer = result.result.get("answer")
+            
+            # 更新对话
+            self.dialogue.put(Message(role="assistant", content=answer))
+            self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
+  
+            return True
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
+            return False
 
     def _priority_thread(self):
         while not self.stop_event.is_set():
@@ -317,11 +369,11 @@ class ConnectionHandler:
                 )
                 self.logger.bind(tag=TAG).error(f"tts_priority priority_thread: {text}{e}")
 
-    def speak_and_play(self, text):
+    def speak_and_play(self, text, config:dict=None):
         if text is None or len(text) <= 0:
             self.logger.bind(tag=TAG).info(f"无需tts转换，query为空，{text}")
             return None, text
-        tts_file = self.tts.to_tts(text)
+        tts_file = self.tts.to_tts(text, config)
         if tts_file is None:
             self.logger.bind(tag=TAG).error(f"tts转换失败，{text}")
             return None, text

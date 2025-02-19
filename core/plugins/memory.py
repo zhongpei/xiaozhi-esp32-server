@@ -11,82 +11,11 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from datetime import datetime
 import logging
-
+from core.utils.intent import IntentRecognizer,IntentResult
+from core.plugins.base import PluginBase,PluginResult,PluginEvent,ChatHistory
 logger = logging.getLogger(__name__)
 # Cosine similarity function
 cos_sim = lambda a, b: (a @ b.T) / (norm(a) * norm(b))
-
-
-import numpy as np
-
-class IntentRecognizer:
-    intent_embeddings_cache = {}
-    cache_lock = threading.Lock()
-    def __init__(self, embedding_model):
-        self.embedding_model = embedding_model
-        # 存储注册的意图和相似度阈值以及对应的回调函数
-        self.intent_callbacks = []
-        
-    def register_intent(self, intent_phrases, callback_function, similarity_threshold=0.7):
-        """
-        注册一个意图
-        :param intent_phrases: 意图相关的短语列表
-        :param callback_function: 对应的回调函数
-        :param similarity_threshold: 意图与查询的相似度阈值，默认为0.7
-        """
-        with self.cache_lock:
-            for phrase in intent_phrases:
-                # 如果该短语的嵌入已经缓存，则直接使用缓存
-                if phrase not in IntentRecognizer.intent_embeddings_cache:
-                    # 计算嵌入并缓存
-                    intent_embedding = self.embedding_model.encode([phrase])[0]
-                    IntentRecognizer.intent_embeddings_cache[phrase] = intent_embedding
-                else:
-                    # 使用缓存的嵌入
-                    intent_embedding = IntentRecognizer.intent_embeddings_cache[phrase]
-
-                # 存储每个意图短语及其对应的回调函数和相似度阈值
-                self.intent_callbacks.append({
-                    "phrase": phrase,
-                    "embedding": intent_embedding,
-                    "callback": callback_function,
-                    "threshold": similarity_threshold
-                })
-
-    def handle_query(self, query: str, *args, **kwargs):
-        """
-        处理用户查询并进行意图识别，调用匹配的回调函数
-        :param query: 用户查询
-        :param args: 任意位置参数传递给回调函数
-        :param kwargs: 任意关键字参数传递给回调函数
-        :return: 回调函数的返回值
-        """
-        query = query.strip()
-        # 计算用户查询的嵌入表示
-        query_embedding = self.embedding_model.encode([query])[0]
-        
-        best_match = None
-        highest_similarity = -1
-        matched_callback = None
-
-        # 比较查询与注册的意图短语的相似度
-        for intent in self.intent_callbacks:
-            similarity = np.dot(query_embedding, intent["embedding"]) / (np.linalg.norm(query_embedding) * np.linalg.norm(intent["embedding"]))
-            if similarity > highest_similarity and similarity >= intent["threshold"]:
-                highest_similarity = similarity
-                best_match = intent["phrase"]
-                matched_callback = intent["callback"]
-
-        if best_match and matched_callback:
-            # 调用与匹配意图对应的回调函数，传递位置参数和关键字参数
-            logger.info(f"{query}\t意图识别结果：{best_match}\tfunc:{matched_callback}\t (相似度: {highest_similarity:.2f})")
-            return matched_callback(query,*args, **kwargs)
-        logger.info(f"{query}\t未识别到意图")
-        return None
-
-
-
-
 
 
 class MemoryManager:
@@ -117,7 +46,7 @@ class MemoryManager:
         :param summary_length: 每次生成的总结的长度
         :param memory_file: 保存记忆数据的文件路径
         """
-        logger.info(f"初始化记忆管理器 max_memory_length:{max_memory_length} summary_length:{summary_length} max_summary_length:{max_summary_length}")
+        print(f"初始化记忆管理器 max_memory_length:{max_memory_length} summary_length:{summary_length} max_summary_length:{max_summary_length}")
         self.max_memory_length = max_memory_length
         self.summary_length = summary_length
         self.max_summary_length = max_summary_length
@@ -329,11 +258,11 @@ class MemoryManager:
         if len(query) == 0:
             return query
         
-        result = self.intent_recognizer.handle_query(query, token_name)
-        if result is None:
-            return query
+        result:IntentResult = self.intent_recognizer.handle_query(query, token_name)
+        if result.success:
+            return result.response
 
-        return result
+        return query
     
 
     def get_memory_summary(self, token_name: str) -> str:
@@ -420,7 +349,7 @@ class MemoryManager:
                 }
 
                 file_path = os.path.join(self.memory_dir, f"{token_name}.json")
-                with open(file_path, 'w', encoding='utf-8') as file:
+                with open(file_path, 'w+', encoding='utf-8') as file:
                     json.dump(memory_data_serializable, file, ensure_ascii=False, indent=4)
                 logger.info(f"记忆已保存至 {file_path}")
 
@@ -457,13 +386,63 @@ class MemoryManager:
 
         except Exception as e:
             logger.warning(f"加载记忆时出错: {e}")
-            
+
+
+
+class Plugin(PluginBase):
+    name = "MemoryPlugin"
+    def __init__(self, plugin_manager, embd, llm, tts, config):
+        super().__init__(plugin_manager, embd, llm, tts, config)
+        config_memory = config.get("memory", {})
+        self.llm_memory = MemoryManager(
+            llm=llm, 
+            embd=embd,
+            summary_prompt=config_memory.get("summary_prompt", "你还保留着一些长期的记忆，这有助于让你的对话更加丰富和连贯："),
+            max_memory_length=config_memory.get("max_memory_length", 10000),
+            max_summary_length=config_memory.get("max_summary_length", 2000),
+            summary_length=config_memory.get("summary_length", 1000),
+            memory_dir=config_memory.get("memory_dir", "memory_data"),
+        )
+        print(f"init MemoryPlugin")
+
+    def on_chat_end(self, token_id, query, answer, chat_history):
+        return super().on_chat_end(token_id, query, answer, chat_history)
+
+
+    def on_chat_start(self, token_id:str, query:str, chat_history:ChatHistory)->PluginResult:
+        new_query = self.llm_memory.handle_user_scene(token_id, query)
+
+        result = PluginResult(success=True)
+        if new_query:
+            result.add_modify("query", new_query, query)       
+
+        # add summary to chat history
+        summary = self.llm_memory.get_memory_summary(token_id)
+        if summary is None or summary == "":
+            return result
+
+        old_system_prompt = chat_history.get_system_prompt()
+
+        prompt_start = "\n\n你还保留着一些长期的记忆，这有助于让你的对话更加丰富和连贯:"
+        old_system_prompt = old_system_prompt.split(prompt_start)[0]
+        new_system_prompt = f"{old_system_prompt}{prompt_start}\n<summary>{summary}</summary>"
+
+        chat_history.set_system_prompt(new_system_prompt)
+        
+        result.add_modify("chat_history", chat_history)
+
+        return result
+
+    
+    async def on_disconnect(self,token_id, chat_history:ChatHistory)->None:
+        await self.llm_memory.add_chat_paragraph(token_id,chat_history.get_chat_history_without_system())
+
 
 if __name__ == '__main__':
     from sentence_transformers import SentenceTransformer
     # 示例使用
     embedding_model = SentenceTransformer('jinaai/jina-embeddings-v2-base-zh', trust_remote_code=True, device="cpu")
-    memory_manager = MemoryManager(llm=None, embedding_model=embedding_model, max_memory_length=100)
+    memory_manager = MemoryManager(llm=None, embd=embedding_model, max_memory_length=100)
 
     # 模拟两段对话
     chat_paragraph1 = [

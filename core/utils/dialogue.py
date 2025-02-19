@@ -1,7 +1,8 @@
 import uuid
 from typing import List, Dict
 from datetime import datetime
-
+import logging
+logger = logging.getLogger(__name__)
 
 class Message:
     def __init__(self, role: str, content: str = None, uniq_id: str = None):
@@ -19,20 +20,20 @@ class Dialogue:
     def put(self, message: Message):
         self.dialogue.append(message)
 
-    def get_llm_dialogue_with_memory(self, memory_data:str) -> List[Dict[str, str]]:
-        dialogue = []            
-
-        for m in self.dialogue:
-            if m.role == "system" and len(memory_data.strip()) > 0:
-                content = f"{m.content}\n\n你还保留着一些长期的记忆，这有助于让你的对话更加丰富和连贯：\n<start>{memory_data}</end>"
-            else:
-                content = m.content
-            dialogue.append({"role": m.role, "content": content})
-        
-        return dialogue
-
     def get_llm_dialogue(self) -> List[Dict[str, str]]:
         dialogue = []
         for m in self.dialogue:
             dialogue.append({"role": m.role, "content": m.content})
         return dialogue
+
+def chat_history_to_dialogue(chat_history: list[dict[str, str]]) -> Dialogue:
+    """
+    将 chat history（列表形式，每个元素为包含 'role' 和 'content' 的字典）
+    转换为 Dialogue 对象。
+    """
+    dialogue = Dialogue()
+    for entry in chat_history:        
+        message = Message(role=entry["role"], content=entry["content"])
+        dialogue.put(message)
+    return dialogue
+

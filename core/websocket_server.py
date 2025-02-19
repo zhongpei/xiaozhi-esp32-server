@@ -4,7 +4,7 @@ from config.logger import setup_logging
 from core.connection import ConnectionHandler
 from core.utils.util import get_local_ip
 from core.utils import asr, vad, llm, tts, embedding
-
+from core.plugins.base import PluginManager
 TAG = __name__
 
 class WebSocketServer:
@@ -12,6 +12,8 @@ class WebSocketServer:
         self.config = config
         self.logger = setup_logging()
         self._vad, self._asr, self._llm, self._tts, self._embd  = self._create_processing_instances()
+        self._plugin_manager = PluginManager()
+        self._plugin_manager.load_plugins_from_config(config,embd=self._embd, llm=self._llm, tts=self._tts)
 
     def _create_processing_instances(self):
         """创建处理模块实例"""
@@ -62,5 +64,5 @@ class WebSocketServer:
 
     async def _handle_connection(self, websocket):
         """处理新连接，每次创建独立的ConnectionHandler"""
-        handler = ConnectionHandler(self.config, self._vad, self._asr, self._llm, self._tts, self._embd)
+        handler = ConnectionHandler(self.config, self._vad, self._asr, self._llm, self._tts, self._embd, self._plugin_manager)
         await handler.handle_connection(websocket)
