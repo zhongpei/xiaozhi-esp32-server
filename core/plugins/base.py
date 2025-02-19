@@ -6,7 +6,10 @@ import os
 import sys
 import importlib
 
+from config.logger import setup_logging
 
+logger = setup_logging()
+TAG = __name__
 
 class PluginEvent(Enum):
     CHAT_START = "chat_start"      # 聊天开始
@@ -137,12 +140,12 @@ class PluginBase(ABC):
         self._llm = llm
         self._tts = tts
         self._config = config 
-        print(f"PluginBase {self._config}")  
+        # print(f"PluginBase {self._config}")  
 
         # 注册事件（示例，实际注册时请取消注释）
-        plugin_manager.register_event(PluginEvent.CHAT_START, self.on_chat_start)
-        plugin_manager.register_event(PluginEvent.CHAT_END, self.on_chat_end)
-        plugin_manager.register_event(PluginEvent.DISCONNECT, self.on_disconnect)
+        # plugin_manager.register_event(PluginEvent.CHAT_START, self.on_chat_start)
+        # plugin_manager.register_event(PluginEvent.CHAT_END, self.on_chat_end)
+        # plugin_manager.register_event(PluginEvent.DISCONNECT, self.on_disconnect)
 
     def __str__(self):
         return self.name
@@ -150,7 +153,7 @@ class PluginBase(ABC):
     def __repr__(self):
         return self.name
     
-    @abstractmethod
+
     def on_chat_start(self, token_id: str, query: str, chat_history: ChatHistory) -> PluginResult:
         """
         聊天开始时的回调，可修改 query 和 chat_history。
@@ -158,7 +161,7 @@ class PluginBase(ABC):
         """
         pass
 
-    @abstractmethod
+
     def on_chat_end(self, token_id: str, query: str, answer: str, chat_history: ChatHistory) -> PluginResult:
         """
         聊天结束时的回调，可修改 query、answer 和 chat_history。
@@ -166,7 +169,7 @@ class PluginBase(ABC):
         """
         pass
 
-    @abstractmethod
+
     async def on_disconnect(self, token_id: str, chat_history: ChatHistory) -> None:
         """
         断开连接时的回调，可修改 chat_history。
@@ -210,7 +213,7 @@ class PluginManager:
         for _, callback in callbacks:
             # print(f"trigger_event callback {callback} {args} {kwargs}")
             new_result = callback(*args, **kwargs)
-            print(f"trigger_event callback  {callback}  {new_result}")
+            # print(f"trigger_event callback  {callback}  {new_result}")
             if new_result:
                 result.merge(new_result)
         # print(f"trigger_event result {result}")
@@ -226,10 +229,10 @@ class PluginManager:
         :param args: 传递给回调函数的位置参数
         :param kwargs: 传递给回调函数的关键字参数
         """
-        print(f"async_trigger_event {event} {args} {kwargs}")
+        # print(f"async_trigger_event {event} {args} {kwargs}")
         callbacks = sorted(self._callbacks.get(event, []), key=lambda x: x[0])
         for _, callback in callbacks:
-            print(f"async_trigger_event callback {callback} {args} {kwargs}")
+            # print(f"async_trigger_event callback {callback} {args} {kwargs}")
             await callback(*args, **kwargs)
 
     
@@ -246,15 +249,15 @@ class PluginManager:
         :return: 插件实例
         """
         plugin_path = os.path.join('core','plugins', f'{class_name}.py')
-        print(f"1 {plugin_path}")
+
         if os.path.exists(plugin_path):
-            print(f"2 {plugin_path}")
+
             lib_name = f'core.plugins.{class_name}'
             if lib_name not in sys.modules:
-                print(f"3 {plugin_path}")
+
                 sys.modules[lib_name] = importlib.import_module(lib_name)
             # 假定每个插件模块中都定义了 Plugin 类
-            print(f"4 {plugin_path}")
+ 
             return sys.modules[lib_name].Plugin(plugin_manager=self,embd=embd, llm=llm, tts=tts, config=config)
         raise ValueError(f"不支持的插件类型: {class_name}，请检查该配置的 type 是否设置正确")
 
@@ -279,12 +282,12 @@ class PluginManager:
         config_plugin = config.get("plugins", {})
             
         enabled_plugins = config_plugin.get("enabled_plugins", [])
-        print(f"enabled_plugins {enabled_plugins}")
+
         for class_name in enabled_plugins:
             instance = self._create_instance(class_name, embd, llm, tts, config_plugin)
             with self._lock:
                 self._plugin_instances[class_name] = instance
-            print(f"加载插件 {class_name} 成功")
+            logger.bind(tag=TAG).info(f"加载插件 {class_name} 成功")
         return self._plugin_instances
         
 

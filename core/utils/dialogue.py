@@ -1,8 +1,7 @@
 import uuid
 from typing import List, Dict
 from datetime import datetime
-import logging
-logger = logging.getLogger(__name__)
+
 
 class Message:
     def __init__(self, role: str, content: str = None, uniq_id: str = None):

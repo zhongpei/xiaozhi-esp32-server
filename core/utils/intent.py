@@ -1,9 +1,10 @@
 import threading
 import numpy as np
 import logging
+from config.logger import setup_logging
 
-
-logger = logging.getLogger(__name__)
+logger = setup_logging()
+TAG = __name__
 
 class IntentResult:
     """
@@ -87,11 +88,11 @@ class IntentRecognizer:
                 matched_callback = intent["callback"]
 
         if best_match and matched_callback:
-            logger.info(f"{query}\t意图识别结果：{best_match}\tfunc:{matched_callback}\t (相似度: {highest_similarity:.2f})")
-            print(f"{query}\t意图识别结果：{best_match}\tfunc:{matched_callback}\t (相似度: {highest_similarity:.2f})")
+            logger.bind(tag=TAG).info(f"{query}\t意图识别结果：{best_match}\tfunc:{matched_callback}\t (相似度: {highest_similarity:.2f})")
+            
             response = matched_callback(query, *args, **kwargs)
             return IntentResult(success=True, intent=best_match, similarity=highest_similarity, response=response)
 
-        logger.info(f"{query}\t未识别到意图")
-        print(f"{query}\t未识别到意图")
+        logger.bind(tag=TAG).info(f"{query}\t未识别到意图")
+
         return IntentResult(success=False, intent=None, similarity=highest_similarity, response=None)

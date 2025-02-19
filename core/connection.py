@@ -232,21 +232,15 @@ class ConnectionHandler:
             query,
             ChatHistory.create_from_chat_history(self.dialogue.get_llm_dialogue())
         )
-        print(f"connect1  {result}")
+        # print(f"connect1  {result}")
 
         if result.modified:
-            
-            self.logger.bind(tag=TAG).debug(f"Modified: {result.result}")
-            
             if result.result.get("query"):
                 query = result.result.get("query")
-                print(f"query  modified {query}")
             if result.result.get("chat_history"):
-                self.dialogue = chat_history_to_dialogue(result.result.get("chat_history").get_chat_history())    
-                print(f"dialogue  modified {self.dialogue.get_llm_dialogue()}")      
+                self.dialogue = chat_history_to_dialogue(result.result.get("chat_history").get_chat_history())  
             if result.result.get("tts_config"):
                 self.tts_config =  result.result.get("tts_config")
-                print(f"tts_config  modified {self.tts_config}")
 
         self.dialogue.put(Message(role="user", content=query))            
         response_message = []
@@ -303,7 +297,6 @@ class ConnectionHandler:
                 ChatHistory.create_from_chat_history(self.dialogue.get_llm_dialogue())
             )
             if result.modified:
-                self.logger.bind(tag=TAG).debug(f"Modified: {result.result}")
                 # if result.result.get("query"):
                 #    query = result.result.get("query")
                 if result.result.get("chat_history"):

@@ -46,7 +46,7 @@ class MemoryManager:
         :param summary_length: 每次生成的总结的长度
         :param memory_file: 保存记忆数据的文件路径
         """
-        print(f"初始化记忆管理器 max_memory_length:{max_memory_length} summary_length:{summary_length} max_summary_length:{max_summary_length}")
+        # print(f"初始化记忆管理器 max_memory_length:{max_memory_length} summary_length:{summary_length} max_summary_length:{max_summary_length}")
         self.max_memory_length = max_memory_length
         self.summary_length = summary_length
         self.max_summary_length = max_summary_length
@@ -403,11 +403,8 @@ class Plugin(PluginBase):
             summary_length=config_memory.get("summary_length", 1000),
             memory_dir=config_memory.get("memory_dir", "memory_data"),
         )
-        print(f"init MemoryPlugin")
-
-    def on_chat_end(self, token_id, query, answer, chat_history):
-        return super().on_chat_end(token_id, query, answer, chat_history)
-
+        plugin_manager.register_event(PluginEvent.CHAT_START, self.on_chat_start)
+        plugin_manager.register_event(PluginEvent.DISCONNECT, self.on_disconnect)
 
     def on_chat_start(self, token_id:str, query:str, chat_history:ChatHistory)->PluginResult:
         new_query = self.llm_memory.handle_user_scene(token_id, query)

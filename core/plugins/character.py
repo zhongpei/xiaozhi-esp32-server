@@ -140,8 +140,6 @@ class CharacterManager:
         if not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
 
-        self.lock = threading.Lock()  # 保证线程安全
-
         self.intent_recognizer = IntentRecognizer(embd)
         self.intent_recognizer.register_intent(
             ["切换角色", "他在旁边吗？", "帮我叫一下小", "找一下小王"], 
@@ -189,7 +187,7 @@ class CharacterManager:
             for mood, tts_data in char_data["tts_configs"].items():
                 character.set_tts_config(mood, tts_data["tts_reference"], tts_data["tts_text"])
             self.add_character(character)
-            print(f"Loaded character: {character.name}")
+            # print(f"Loaded character: {character.name}")
 
     def add_character(self, character: Character):
         """
@@ -208,8 +206,7 @@ class CharacterManager:
         result = self.intent_recognizer.handle_query(query, token_name)
         if result.success:
             text,character = result.response
-            print(f" current_character {self.current_character} ==> {character.name}")
-            self.current_character = character
+            print(f"current_character {self.current_character} ==> {character.name}")            
             return text,character           
 
         return None,None
@@ -221,7 +218,7 @@ class CharacterManager:
         :param character_name: 角色的名字
         """
         
-            
+        
         if self.current_character:
             # 保存当前角色的聊天记录到文件
             fn =os.path.join(self.directory, f"{self.current_character.name}_chat_history.json")
@@ -234,6 +231,7 @@ class CharacterManager:
             fn = os.path.join(self.directory, f"{new_character.name}_chat_history.json")
             if os.path.exists(fn):
                 new_character.load_chat_history(fn)
+
             self.current_character = new_character
         
             return self.current_character
@@ -252,14 +250,13 @@ class CharacterManager:
 
 class Plugin(PluginBase):
     name = "CharacterPlugin"
-    def __init__(self, plugin_manager, embd, llm, tts, config):
-        print("CharacterPlugin init 1")
+    def __init__(self, plugin_manager, embd, llm, tts, config):        
         super().__init__(plugin_manager, embd, llm, tts, config)
-        print("CharacterPlugin init 2")
         self.character_manager = CharacterManager(embd, config)
+        plugin_manager.register_event(PluginEvent.CHAT_START, self.on_chat_start, priority=1)
+        plugin_manager.register_event(PluginEvent.CHAT_END, self.on_chat_end)
 
-    async def on_disconnect(self, token_id, chat_history):
-        return await super().on_disconnect(token_id, chat_history)
+
 
     def on_chat_end(self, token_id: str, query: str, answer: str, chat_history: ChatHistory):
         character = self.character_manager.get_current_character(token_id)
@@ -278,14 +275,12 @@ class Plugin(PluginBase):
             character.add_to_chat_history("user", query)
         
         query, new_character = self.character_manager.handel_switch_character(token_id, query)
-        print("==> new_character",new_character)
-        if new_character:
-            self.character_manager.switch_character(new_character.name)
-            character.add_to_chat_history("user", query)
-            
+        # print(f"{character}==> new_character {new_character}",)
+        if new_character:            
+            new_character.add_to_chat_history("user", query)            
             result.add_modify("query", query)
-            result.add_modify("chat_history", character.get_chat_history())
-            result.add_modify("tts_config", character.get_tts_config())
+            result.add_modify("chat_history", new_character.get_chat_history())
+            result.add_modify("tts_config", new_character.get_tts_config())
         return result       
 
 if __name__ == '__main__':
